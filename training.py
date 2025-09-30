@@ -6,18 +6,22 @@ from typing import List, Tuple
 from model import TinyLLM
 from config import DEVICE
 
-
 class DataLoader:
     """Simple data loader for language modeling."""
     
     def __init__(self, train_ids: List[int]):
-        self.train_ids = train_ids
+        # Pre-convert to tensor for efficiency
+        self.train_tensor = torch.tensor(train_ids, dtype=torch.long)
+        self.data_length = len(train_ids)
     
     def get_batch(self, batch_size: int, context_size: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """Get a random batch of training data."""
-        ix = torch.randint(len(self.train_ids) - context_size, (batch_size,))
-        x = torch.stack([torch.tensor(self.train_ids[i:i+context_size]) for i in ix])
-        y = torch.stack([torch.tensor(self.train_ids[i+1:i+context_size+1]) for i in ix])
+        ix = torch.randint(self.data_length - context_size, (batch_size,))
+        
+        # Efficient batch creation using pre-converted tensor
+        x = torch.stack([self.train_tensor[i:i+context_size] for i in ix])
+        y = torch.stack([self.train_tensor[i+1:i+context_size+1] for i in ix])
+        
         return x.to(DEVICE), y.to(DEVICE)
 
 
@@ -33,13 +37,11 @@ class Trainer:
     ):
         self.model = model
         self.data_loader = data_loader
-        self.vocab_size = vocab_size
+        self.vocab_size = vocab_size or model.vocab_size
         
         # Optimizer and scheduler
         self.optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
-        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            self.optimizer, T_max=1000
-        )
+        self.scheduler = None  # Will be initialized in train() method
         
         # Training metrics
         self.losses = []
@@ -65,7 +67,8 @@ class Trainer:
         # Backward pass
         loss.backward()
         self.optimizer.step()
-        self.scheduler.step()
+        if self.scheduler is not None:
+            self.scheduler.step()
         
         return loss.item()
     
@@ -77,15 +80,25 @@ class Trainer:
         print_interval: int = 50
     ) -> None:
         """Train the model for specified number of epochs."""
+        # Initialize scheduler with actual number of epochs
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            self.optimizer, T_max=num_epochs
+        )
+        
         print(f"Starting training for {num_epochs} epochs...")
         print(f"Model parameters: {self.model.get_num_params():,}")
         print(f"Estimated memory usage: {self.model.estimate_memory_usage()}")
         
         for epoch in range(num_epochs):
             loss = self.train_step(batch_size, context_size)
-            self.losses.append(loss)
-            self.current_epoch = epoch
             
+            if len(self.losses) < 1000:  # Keep only last 1000 losses
+                self.losses.append(loss)
+            else:
+                self.losses = self.losses[1:] + [loss]  # Rolling window
+            self.current_epoch = epoch
+            if epoch % 100 == 0:
+                torch.cuda.empty_cache() 
             if epoch % print_interval == 0:
                 print(f"Epoch {epoch}, loss {loss:.4f}")
         
@@ -96,7 +109,7 @@ class Trainer:
         checkpoint = {
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'scheduler_state_dict': self.scheduler.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
             'epoch': self.current_epoch,
             'losses': self.losses
         }
@@ -108,7 +121,8 @@ class Trainer:
         checkpoint = torch.load(filepath, map_location=DEVICE)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        if self.scheduler and checkpoint.get('scheduler_state_dict'):
+            self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         self.current_epoch = checkpoint['epoch']
         self.losses = checkpoint['losses']
         print(f"Checkpoint loaded from {filepath}")
@@ -124,3 +138,4 @@ class Trainer:
             "best_loss": min(self.losses),
             "avg_loss": sum(self.losses) / len(self.losses)
         }
+ 

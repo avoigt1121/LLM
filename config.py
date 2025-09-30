@@ -3,15 +3,15 @@
 import torch
 
 # Model hyperparameters
-EMBED_DIM = 16
-CONTEXT_SIZE = 32
-NUM_HEADS = 2
-NUM_LAYERS = 1
+EMBED_DIM = 256
+CONTEXT_SIZE = 512
+NUM_HEADS = 4
+NUM_LAYERS = 6
 
 # Training hyperparameters
 BATCH_SIZE = 32
 LEARNING_RATE = 1e-4
-NUM_EPOCHS = 2000
+NUM_EPOCHS = 20000
 PRINT_INTERVAL = 50
 
 # Data settings

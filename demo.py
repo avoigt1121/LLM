@@ -34,7 +34,6 @@ def quick_demo():
     print(f"   Parameters: {model.get_num_params():,}")
     
     # 3. Quick training (just a few epochs for demo)
-    print("\n3. Quick training (100 epochs)...")
     data_loader = DataLoader(train_ids)
     trainer = Trainer(
         model=model,
@@ -44,7 +43,7 @@ def quick_demo():
     )
     
     trainer.train(
-        num_epochs=100,  # Just for demo
+        num_epochs=NUM_EPOCHS,  # Just for demo
         batch_size=BATCH_SIZE,
         context_size=CONTEXT_SIZE,
         print_interval=25
